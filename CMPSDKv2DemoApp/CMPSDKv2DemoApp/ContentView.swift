@@ -5,39 +5,74 @@
 //  Created by Fabio Torre on 23/10/24.
 //
 
-
 import SwiftUI
 import CmpSdk
+import Combine
 
 struct ContentView: View {
-    @State private var isConsentInitialized = false
+    @StateObject private var viewModel = ContentViewModel()
     
     var body: some View {
-        if isConsentInitialized {
-            HomeView()
-        } else {
-            InitializationView(onConsentInitialized: { isConsentInitialized = true })
+        ZStack {
+            if viewModel.showConsentControls {
+                ConsentControlsView()
+            } else {
+                LoadingView()
+            }
+            
+            if viewModel.showConsentWebView {
+                ConsentWebView()
+            }
         }
     }
 }
 
-struct HomeView: View {
-    var body: some View {
-        NavigationView {
-            ConsentViewControllerRepresentable(onConsentInitialized: nil)
-                .navigationBarHidden(true)
+class ContentViewModel: ObservableObject {
+    @Published var showConsentControls = false
+    @Published var showConsentWebView = true
+    
+    private var cancellables = Set<AnyCancellable>()
+
+    init() {
+        setupNotifications()
+        setupBindings()
+        initializeCMP()
+    }
+    
+    private func setupBindings() {
+        // Observe CMPManager's isConsentLayerVisible property
+        CMPManager.shared.$isConsentLayerVisible
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isVisible in
+                self?.showConsentWebView = isVisible
+            }
+            .store(in: &cancellables)
+    }
+
+    private func setupNotifications() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleCMPClosed),
+            name: .cmpClosed,
+            object: nil
+        )
+    }
+    
+    private func initializeCMP() {
+        DispatchQueue.main.async {
+            CMPManager.shared.initialize()
+            self.showConsentControls = true
         }
     }
-}
 
-struct InitializationView: View {
-    let onConsentInitialized: () -> Void
+    @objc private func handleCMPClosed() {
+        DispatchQueue.main.async {
+            self.showConsentWebView = false
+        }
+    }
     
-    var body: some View {
-        ConsentViewControllerRepresentable(onConsentInitialized: onConsentInitialized)
-            .overlay(
-                Text("Initializing Consent Manager...")
-                    .font(.headline)
-            )
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        cancellables.removeAll()
     }
 }
